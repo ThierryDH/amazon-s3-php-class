@@ -2004,11 +2004,10 @@ class S3
 
 		// CanonicalHeaders
 		foreach ($headers as $k => $v)
-			$combinedHeaders[strtolower($k)] = trim($v);
+			if(trim($v) != "") $combinedHeaders[strtolower($k)] = trim($v);
 		foreach ($amzHeaders as $k => $v) 
-			$combinedHeaders[strtolower($k)] = trim($v);
+			if(trim($v) != "") $combinedHeaders[strtolower($k)] = trim($v);
 		uksort($combinedHeaders, array('self', '__sortMetaHeadersCmp'));
-
 		// Convert null query string parameters to strings and sort
 		$parameters = array_map('strval', $parameters); 
 		uksort($parameters, array('self', '__sortMetaHeadersCmp'));
@@ -2048,7 +2047,6 @@ class S3
 		$kRegion = hash_hmac('sha256', $region, $kDate, true);
 		$kService = hash_hmac('sha256', $service, $kRegion, true);
 		$kSigning = hash_hmac('sha256', 'aws4_request', $kService, true);
-
 		$signature = hash_hmac('sha256', $stringToSignStr, $kSigning);
 
 		return $algorithm . ' ' . implode(',', array(
@@ -2351,11 +2349,10 @@ final class S3Request
 					$this->amzHeaders['x-amz-content-sha256'] = hash('sha256', $this->data);
 
 				foreach ($this->amzHeaders as $header => $value)
-					if (strlen($value) > 0) $httpHeaders[] = $header.': '.$value;
+					if (strlen($value) > 0)$httpHeaders[] = $header.': '.$value;
 
 				foreach ($this->headers as $header => $value)
 					if (strlen($value) > 0) $httpHeaders[] = $header.': '.$value;
-
 				$httpHeaders[] = 'Authorization: ' . S3::__getSignatureV4(
 					$this->amzHeaders,
 					$this->headers, 
@@ -2363,7 +2360,6 @@ final class S3Request
 					$this->uri,
 					$this->parameters
 				);
-
 			}
 		}
 
@@ -2421,7 +2417,6 @@ final class S3Request
 			);
 
 		@curl_close($curl);
-
 		// Parse body into XML
 		if ($this->response->error === false && isset($this->response->headers['type']) &&
 		$this->response->headers['type'] == 'application/xml' && isset($this->response->body))
@@ -2474,13 +2469,7 @@ final class S3Request
 	*/
 	private function __dnsBucketName($bucket)
 	{
-		if (strlen($bucket) > 63 || preg_match("/[^a-z0-9\.-]/", $bucket) > 0) return false;
-		if (S3::$useSSL && strstr($bucket, '.') !== false) return false;
-		if (strstr($bucket, '-.') !== false) return false;
-		if (strstr($bucket, '..') !== false) return false;
-		if (!preg_match("/^[0-9a-z]/", $bucket)) return false;
-		if (!preg_match("/[0-9a-z]$/", $bucket)) return false;
-		return true;
+		return false;
 	}
 
 
