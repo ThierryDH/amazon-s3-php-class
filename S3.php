@@ -649,6 +649,7 @@ class S3
 			self::__triggerError('S3::inputFile(): Unable to open input file: '.$file, __FILE__, __LINE__);
 			return false;
 		}
+
 		clearstatcache(false, $file);
 		return array('file' => $file, 'size' => filesize($file), 'md5sum' => $md5sum !== false ?
 		(is_string($md5sum) ? $md5sum : base64_encode(md5_file($file, true))) : '', 'sha256sum' => hash_file('sha256', $file));
@@ -703,7 +704,7 @@ class S3
 	*/
 	public static function putObject($input, $bucket, $uri, $acl = self::ACL_PRIVATE, $metaHeaders = array(), $requestHeaders = array(), $storageClass = self::STORAGE_CLASS_STANDARD, $serverSideEncryption = self::SSE_NONE)
 	{
-		if ($input === false) return false;
+        if ($input === false) return false;
 		$rest = new S3Request('PUT', $bucket, $uri, self::$endpoint);
 
 		if (!is_array($input)) $input = array(
@@ -740,12 +741,13 @@ class S3
 			$input['type'] = $requestHeaders;
 
 		// Content-Type
+
 		if (!isset($input['type']))
 		{
 			if (isset($requestHeaders['Content-Type']))
 				$input['type'] =& $requestHeaders['Content-Type'];
 			elseif (isset($input['file']))
-				$input['type'] = self::__getMIMEType($input['file']);
+				$input['type'] = self::__getMIMEType($input['file'], $uri);
 			else
 				$input['type'] = 'application/octet-stream';
 		}
@@ -1890,11 +1892,12 @@ class S3
 	*
 	* To use fileinfo, ensure the MAGIC environment variable is set
 	*
+    * Ajout de URI dans le cas ou l'obtention du type est impossible même via getMimeTypeFromPath()
 	* @internal Used to get mime types
 	* @param string &$file File path
 	* @return string
 	*/
-	private static function __getMIMEType(&$file)
+	private static function __getMIMEType(&$file, $uri)
 	{
 		static $exts = array(
 			'jpg' => 'image/jpeg', 'jpeg' => 'image/jpeg', 'gif' => 'image/gif',
@@ -1915,6 +1918,17 @@ class S3
 		);
 
 		$ext = strtolower(pathinfo($file, PATHINFO_EXTENSION));
+		if(!isset($exts[$ext])){
+            $file = pathinfo($file);
+		    $ext = self::getMimeTypeFromPath($file["dirname"]."/".$file["basename"]);
+		    if($ext != ""){
+		        return $ext;
+            } else {
+                $ext = strtolower(pathinfo($uri, PATHINFO_EXTENSION));
+            }
+        }
+
+
 		if (isset($exts[$ext])) return $exts[$ext];
 
 		// Use fileinfo if available
@@ -1936,6 +1950,17 @@ class S3
 		return 'application/octet-stream';
 	}
 
+	/**
+     * Get Mime type of a file from file path
+     */
+	private function getMimeTypeFromPath($path){
+        $guessFiletype = new FileBinaryMimeTypeGuesser();
+        $ext = $guessFiletype->guessMimeType($path);
+        if($ext != "")
+            return $ext;
+
+        return "";
+    }
 
 	/**
 	* Get the current time
@@ -2531,4 +2556,68 @@ class S3Exception extends Exception {
 		$this->file = $file;
 		$this->line = $line;
 	}
+}
+
+/**
+ * Guesses the MIME type with the binary "file" (only available on *nix).
+ *
+ * @author Bernhard Schussek <bschussek@gmail.com>
+ */
+class FileBinaryMimeTypeGuesser
+{
+    private $cmd;
+    /**
+     * The $cmd pattern must contain a "%s" string that will be replaced
+     * with the file name to guess.
+     *
+     * The command output must start with the MIME type of the file.
+     *
+     * @param string $cmd The command to run to get the MIME type of a file
+     */
+    public function __construct($cmd = 'file -b --mime %s 2>/dev/null')
+    {
+        $this->cmd = $cmd;
+    }
+    /**
+     * {@inheritdoc}
+     */
+    public function isGuesserSupported()
+    {
+        $supported = null;
+        if (null !== $supported) {
+            return false;
+        }
+        if ('\\' === \DIRECTORY_SEPARATOR || !\function_exists('passthru') || !\function_exists('escapeshellarg')) {
+            return false;
+        }
+        ob_start();
+        passthru('command -v file', $exitStatus);
+        $binPath = trim(ob_get_clean());
+        return 0 === $exitStatus && '' !== $binPath;
+    }
+    /**
+     * {@inheritdoc}
+     */
+    public function guessMimeType($path)
+    {
+        if (!is_file($path) || !is_readable($path)) {
+            return;
+        }
+        if (!$this->isGuesserSupported()) {
+            return;
+        }
+        ob_start();
+        // need to use --mime instead of -i. see #6641
+        passthru(sprintf($this->cmd, escapeshellarg($path)), $return);
+        if ($return > 0) {
+            ob_end_clean();
+            return null;
+        }
+        $type = trim(ob_get_clean());
+        if (!preg_match('#^([a-z0-9\-]+/[a-z0-9\-\.]+)#i', $type, $match)) {
+            // it's not a type, but an error message
+            return null;
+        }
+        return $match[1];
+    }
 }
